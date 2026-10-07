@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>DSH Bridge</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <h1>DSH Bridge</h1>
+  <p class="subtitle">让 DeepSeek Harness 使用 OpenCode 免费模型</p>
+</header>
+
+<section class="card" id="status-card">
+  <div class="status-row">
+    <span id="status-dot" class="dot idle"></span>
+    <span id="status-text">正在启动…</span>
+  </div>
+  <div class="meta">
+    <div>代理地址：<code id="proxy-url">-</code></div>
+    <div>配置文件：<code id="settings-path">-</code></div>
+    <div>导入状态：<span id="import-state">-</span></div>
+  </div>
+  <div class="actions">
+    <button id="btn-rescan">重新扫描模型</button>
+    <button id="btn-import" class="primary">一键导入到 DeepSeek Harness</button>
+  </div>
+  <p class="hint">导入前请先在 DeepSeek Harness 里保存过一次自定义模型；导入后把环境变量 <code>DSH_BRIDGE_API_KEY</code> 设为任意值再启动 dsh。</p>
+</section>
+
+<section class="card">
+  <h2>免费模型 <span id="model-count" class="count"></span></h2>
+  <table id="model-table">
+    <thead><tr><th>模型</th><th>模型 ID</th><th>探测延迟</th></tr></thead>
+    <tbody><tr><td colspan="3" class="empty">扫描中…</td></tr></tbody>
+  </table>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>
