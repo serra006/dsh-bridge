@@ -31,6 +31,8 @@ const state = {
   imported: false,
   settingsPath: paths.dshSettingsPath(),
   logFile: null,
+  useSystemProxy: false, // 仅 Windows 有效
+  sysProxy: null, // 检测到的系统代理地址
 };
 
 function publicState() {
@@ -75,11 +77,14 @@ async function startup() {
   try {
     // Windows 下读取系统代理（对标 ow-bridge），下载与模型服务都走它
     let proxy = null;
-    if (process.platform === 'win32' && store.load().useSystemProxy !== false) {
+    state.useSystemProxy = process.platform === 'win32' && store.load().useSystemProxy !== false;
+    if (state.useSystemProxy) {
       setStatus('starting', '正在读取系统代理设置…');
       proxy = await sysproxy.getSystemProxy();
-      if (proxy) setStatus('starting', `检测到系统代理：${proxy}`);
+      state.sysProxy = proxy;
+      setStatus('starting', proxy ? `检测到系统代理：${proxy}` : '未检测到系统代理，将直连');
     }
+    sendState();
     setStatus('starting', '正在准备 OpenCode…');
     const { bin, source } = await oc.ensureBinary((m) => setStatus('starting', m), { proxy });
     setStatus('starting', `正在启动隔离的 OpenCode 服务…（来源：${source}）`);
@@ -175,6 +180,10 @@ app.whenReady().then(() => {
   createWindow();
 
   ipcMain.handle('get-state', () => publicState());
+  ipcMain.handle('set-proxy-use', async (_e, use) => {
+    store.save({ useSystemProxy: !!use });
+    return publicState();
+  });
   ipcMain.handle('rescan', async () => { await rescan(); return publicState(); });
   ipcMain.handle('import', async () => {
     const result = await doImport();

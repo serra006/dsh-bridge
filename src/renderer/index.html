@@ -29,6 +29,21 @@
 </section>
 
 <section class="card">
+  <h2>网络代理</h2>
+  <div class="status-row">
+    <span id="proxy-dot" class="dot idle"></span>
+    <span id="proxy-text">检测中…</span>
+  </div>
+  <div class="meta">
+    <div>系统代理地址：<code id="sys-proxy">-</code></div>
+  </div>
+  <div class="actions">
+    <button id="btn-proxy-toggle">…</button>
+  </div>
+  <p class="hint">开启后，OpenCode 下载与模型服务走 Windows 系统代理；关闭则直连。切换后需重启应用生效（托盘菜单 → 退出，再重新打开）。非 Windows 系统不支持此开关。</p>
+</section>
+
+<section class="card">
   <h2>免费模型 <span id="model-count" class="count"></span></h2>
   <table id="model-table">
     <thead><tr><th>模型</th><th>模型 ID</th><th>探测延迟</th></tr></thead>
