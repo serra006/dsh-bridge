@@ -52,6 +52,7 @@ npm run dist:win     # 打 Windows x64 portable 包（在 Linux 下也可执行�
 
 ## 常见问题
 
-- **托盘图标没反应 / 启动失败**：打开控制面板看状态行的具体错误；常见原因是网络连不上 npm 或 Zen 网关；
+- **启动失败 / 卡在"正在启动"**：v0.1.1 起等待时间放宽到 120 秒（Windows 首次启动可能被 Defender 扫描拖慢），状态行会显示进度；如果进程崩溃会直接报真实原因。托盘菜单「打开日志目录」可查看 `opencode-serve.log` 定位问题；
+- **网络连不上 registry 或 Zen 网关**：应用优先直连 `registry.npmjs.org` 下载 OpenCode（失败自动换 npmmirror 镜像），最后兜底走 npm；都不行时请检查网络/代理；
 - **导入后 dsh 里看不到模型**：确认 `DSH_BRIDGE_API_KEY` 环境变量已设置且 dsh 是在设置后启动的；检查 `~/.dsh/settings.yaml` 里有没有 `dsh-bridge` 这一节；
 - **Windows 提示 SmartScreen**：未签名应用的正常提示，确认文件来自本仓库 Releases 后选择"仍要运行"。

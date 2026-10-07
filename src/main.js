@@ -3,7 +3,7 @@
 // 启动流程：准备 OpenCode → 启动隔离的 opencode serve → 启动 OpenAI 兼容代理
 // → 扫描免费模型。控制面板展示模型列表，一键导入 DeepSeek Harness 配置。
 // 退出时默认清理本应用导入的模型条目，用户手动配置不受影响。
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const paths = require('./core/paths');
@@ -29,6 +29,7 @@ const state = {
   proxyUrl: null,
   imported: false,
   settingsPath: paths.dshSettingsPath(),
+  logFile: null,
 };
 
 function publicState() {
@@ -74,7 +75,8 @@ async function startup() {
     setStatus('starting', '正在准备 OpenCode…');
     const { bin, source } = await oc.ensureBinary((m) => setStatus('starting', m));
     setStatus('starting', `正在启动隔离的 OpenCode 服务…（来源：${source}）`);
-    serveCtl = await oc.startServe(bin, SERVE_PORT);
+    serveCtl = await oc.startServe(bin, SERVE_PORT, (m) => setStatus('starting', m));
+    state.logFile = serveCtl.logFile;
     setStatus('starting', '正在启动本地代理…');
     proxyCtl = createProxy({
       getBaseUrl: () => `http://${oc.SERVE_HOST}:${SERVE_PORT}`,
@@ -110,6 +112,7 @@ function buildTrayMenu() {
       click: async () => { try { await doImport(); } catch (e) { setStatus('error', `导入失败：${e.message}`); } },
     },
     { type: 'separator' },
+    { label: '打开日志目录', click: () => shell.openPath(oc.logDir()) },
     {
       label: `退出时清理导入的配置：${cleanup ? '开' : '关'}`,
       click: () => { store.save({ cleanupOnQuit: !cleanup }); sendState(); },
