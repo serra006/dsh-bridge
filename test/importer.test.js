@@ -70,3 +70,12 @@ test('extractText 只取 text 类型的 part', () => {
   const t = extractText({ parts: [{ type: 'text', text: 'hello' }, { type: 'tool_call', text: 'x' }] });
   assert.equal(t, 'hello');
 });
+
+test('parseProxyServer 解析 Windows 代理字符串', () => {
+  const { parseProxyServer } = require('../src/core/sysproxy');
+  assert.equal(parseProxyServer('http=127.0.0.1:7890;https=127.0.0.1:7890'), 'http://127.0.0.1:7890');
+  assert.equal(parseProxyServer('127.0.0.1:7890'), 'http://127.0.0.1:7890');
+  assert.equal(parseProxyServer('http=http://p:8080;https=https://p:8443'), 'https://p:8443');
+  assert.equal(parseProxyServer(''), null);
+  assert.equal(parseProxyServer(null), null);
+});

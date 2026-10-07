@@ -9,6 +9,7 @@ const path = require('path');
 const paths = require('./core/paths');
 const store = require('./core/store');
 const oc = require('./core/opencode');
+const sysproxy = require('./core/sysproxy');
 const discovery = require('./core/discovery');
 const { createProxy } = require('./core/proxy');
 const importer = require('./core/importer');
@@ -72,10 +73,17 @@ async function doImport() {
 
 async function startup() {
   try {
+    // Windows 下读取系统代理（对标 ow-bridge），下载与模型服务都走它
+    let proxy = null;
+    if (process.platform === 'win32' && store.load().useSystemProxy !== false) {
+      setStatus('starting', '正在读取系统代理设置…');
+      proxy = await sysproxy.getSystemProxy();
+      if (proxy) setStatus('starting', `检测到系统代理：${proxy}`);
+    }
     setStatus('starting', '正在准备 OpenCode…');
-    const { bin, source } = await oc.ensureBinary((m) => setStatus('starting', m));
+    const { bin, source } = await oc.ensureBinary((m) => setStatus('starting', m), { proxy });
     setStatus('starting', `正在启动隔离的 OpenCode 服务…（来源：${source}）`);
-    serveCtl = await oc.startServe(bin, SERVE_PORT, (m) => setStatus('starting', m));
+    serveCtl = await oc.startServe(bin, SERVE_PORT, (m) => setStatus('starting', m), { proxy });
     state.logFile = serveCtl.logFile;
     setStatus('starting', '正在启动本地代理…');
     proxyCtl = createProxy({
@@ -102,7 +110,9 @@ function iconPath() {
 function buildTrayMenu() {
   if (!tray) return;
   const ready = state.stage === 'ready';
-  const cleanup = store.load().cleanupOnQuit !== false;
+  const stored = store.load();
+  const cleanup = stored.cleanupOnQuit !== false;
+  const useProxy = stored.useSystemProxy !== false;
   const menu = Menu.buildFromTemplate([
     { label: '打开控制面板', click: () => { if (win) { win.show(); win.focus(); } } },
     { label: '重新扫描模型', enabled: ready && !!serveCtl, click: () => rescan() },
@@ -113,6 +123,10 @@ function buildTrayMenu() {
     },
     { type: 'separator' },
     { label: '打开日志目录', click: () => shell.openPath(oc.logDir()) },
+    ...(process.platform === 'win32' ? [{
+      label: `使用系统代理：${useProxy ? '开' : '关'}（重启生效）`,
+      click: () => { store.save({ useSystemProxy: !useProxy }); sendState(); },
+    }] : []),
     {
       label: `退出时清理导入的配置：${cleanup ? '开' : '关'}`,
       click: () => { store.save({ cleanupOnQuit: !cleanup }); sendState(); },

@@ -88,7 +88,7 @@ function hasCurl() {
   });
 }
 
-function curlFetch(url, { dest, onProgress, timeoutMs = 120000 } = {}) {
+function curlFetch(url, { dest, onProgress, timeoutMs = 120000, proxy } = {}) {
   return new Promise((resolve, reject) => {
     const curl = process.platform === 'win32' ? 'curl.exe' : 'curl';
     const args = ['-fSL', '--retry', '2', '--connect-timeout', '20',
@@ -96,9 +96,14 @@ function curlFetch(url, { dest, onProgress, timeoutMs = 120000 } = {}) {
     if (dest) args.push('--progress-bar', '-o', dest);
     else args.push('-sS');
     args.push(url);
+    // curl 不读 Windows 系统代理，这里通过环境变量显式传入
+    const env = proxy
+      ? { ...process.env, HTTPS_PROXY: proxy, HTTP_PROXY: proxy, https_proxy: proxy, http_proxy: proxy }
+      : process.env;
     const child = spawn(curl, args, {
       stdio: dest ? ['ignore', 'ignore', 'pipe'] : ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+      env,
     });
     let out = '';
     let errOut = '';
@@ -162,9 +167,9 @@ function nodeDownload(url, dest, onProgress) {
   }));
 }
 
-async function fetchJson(url, timeoutMs = 30000) {
+async function fetchJson(url, timeoutMs = 30000, proxy) {
   if (await hasCurl()) {
-    const text = await curlFetch(url, { timeoutMs });
+    const text = await curlFetch(url, { timeoutMs, proxy });
     return JSON.parse(text);
   }
   const res = await httpsGetRaw(url, timeoutMs);
@@ -177,9 +182,9 @@ async function fetchJson(url, timeoutMs = 30000) {
   return JSON.parse(body);
 }
 
-async function downloadFile(url, dest, onProgress) {
+async function downloadFile(url, dest, onProgress, proxy) {
   if (await hasCurl()) {
-    return curlFetch(url, { dest, onProgress });
+    return curlFetch(url, { dest, onProgress, proxy });
   }
   return nodeDownload(url, dest, onProgress);
 }
@@ -196,11 +201,15 @@ function whichOpencode() {
   });
 }
 
-function npmInstall(target, registry) {
+function npmInstall(target, registry, extraEnv) {
   return new Promise((resolve, reject) => {
     const args = ['install', '--no-audit', '--no-fund', '--prefix', target, 'opencode-ai'];
     if (registry) args.push(`--registry=${registry}`);
-    const child = spawn('npm', args, { stdio: 'pipe', windowsHide: true });
+    const child = spawn('npm', args, {
+      stdio: 'pipe',
+      windowsHide: true,
+      env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
+    });
     let errOut = '';
     child.stderr.on('data', (d) => { errOut += d; });
     child.on('close', (code) => {
@@ -238,24 +247,25 @@ function checkVersion(bin) {
   });
 }
 
-// 直连下载：从 registry 取版本 → 平台二进制包 tarball → 解压出可执行文件
-async function ensureBinaryDirect(registry, onProgress) {
+// 下载：从 registry 取版本 → 平台二进制包 tarball → 解压出可执行文件
+// proxy 为系统代理 URL（可空）；直连失败时由调用方换 registry 重试
+async function ensureBinaryDirect(registry, onProgress, proxy) {
   const pkg = platformPkg();
   if (!pkg) throw new Error(`暂不支持的平台: ${process.platform}/${process.arch}`);
   const reg = registry.replace(/\/+$/, '');
-  onProgress && onProgress('正在查询 OpenCode 最新版本…');
-  const meta = await fetchJson(`${reg}/opencode-ai/latest`);
+  onProgress && onProgress(`正在查询 OpenCode 最新版本…${proxy ? '（使用系统代理）' : ''}`);
+  const meta = await fetchJson(`${reg}/opencode-ai/latest`, 30000, proxy);
   const version = meta.version;
   if (!version) throw new Error('查询版本失败');
   onProgress && onProgress(`正在下载 OpenCode ${version}…`);
-  const pkgMeta = await fetchJson(`${reg}/${pkg}/latest`);
+  const pkgMeta = await fetchJson(`${reg}/${pkg}/latest`, 30000, proxy);
   const tarball = pkgMeta.dist && pkgMeta.dist.tarball;
   if (!tarball) throw new Error('找不到二进制包下载地址');
 
   const tmpTgz = path.join(dataDir(), `${pkg}-${version}.tgz`);
   await downloadFile(tarball, tmpTgz, (pct) => {
     onProgress && onProgress(`正在下载 OpenCode ${version}… ${pct}%`);
-  });
+  }, proxy);
 
   onProgress && onProgress('正在解压…');
   const tmpDir = path.join(dataDir(), `${pkg}-${version}`);
@@ -281,9 +291,12 @@ async function ensureBinaryDirect(registry, onProgress) {
 }
 
 // 确保有一个可用的 opencode 可执行文件，返回 { bin, source }
-async function ensureBinary(onProgress) {
-  const fromPath = await whichOpencode();
-  if (fromPath) return { bin: fromPath, source: 'path' };
+// 确保有一个可用的 opencode 可执行文件，返回 { bin, source }
+//
+// 优先级（对标 ow-bridge：应用自带，不依赖用户环境）：
+//  1. 本应用已缓存的；2. 直连下载；3. npm 安装；4. 系统 PATH 里的
+async function ensureBinary(onProgress, opts = {}) {
+  const proxy = opts.proxy || null;
 
   const cached = cachedBin();
   if (cached) {
@@ -298,23 +311,37 @@ async function ensureBinary(onProgress) {
   let lastErr = null;
   for (const reg of REGISTRIES) {
     try {
-      const dest = await ensureBinaryDirect(reg, onProgress);
+      const dest = await ensureBinaryDirect(reg, onProgress, proxy);
       return { bin: dest, source: 'downloaded' };
     } catch (e) {
       lastErr = e;
     }
   }
 
-  // 兜底：npm 安装（需要本机有 npm）
+  // 兜底：npm 安装（需要本机有 npm；代理同样透传）
+  const npmProxyEnv = proxy
+    ? { HTTPS_PROXY: proxy, HTTP_PROXY: proxy, https_proxy: proxy, http_proxy: proxy }
+    : null;
   for (const reg of [null, 'https://registry.npmmirror.com']) {
     try {
       onProgress && onProgress(reg ? '尝试用 npm 从镜像安装 OpenCode…' : '尝试用 npm 安装 OpenCode…');
-      await npmInstall(pkgDir(), reg);
+      await npmInstall(pkgDir(), reg, npmProxyEnv);
       const bin = findPkgBinary();
       if (!bin) throw new Error('安装成功但找不到可执行文件');
       const ver = await checkVersion(bin);
       onProgress && onProgress(`OpenCode 就绪 (${ver})`);
       return { bin, source: 'npm' };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+
+  // 最后才用用户自己装的
+  const fromPath = await whichOpencode();
+  if (fromPath) {
+    try {
+      await checkVersion(fromPath);
+      return { bin: fromPath, source: 'path' };
     } catch (e) {
       lastErr = e;
     }
@@ -333,14 +360,24 @@ function isPortFree(port) {
   });
 }
 
-function tryStart(bin, port, onProgress) {
+function tryStart(bin, port, onProgress, opts = {}) {
   return new Promise((resolve, reject) => {
     const lf = path.join(logDir(), 'opencode-serve.log');
     const log = fs.createWriteStream(lf, { flags: 'a' });
     log.write(`\n===== ${new Date().toISOString()} | ${bin} serve --port ${port} --hostname ${SERVE_HOST}\n`);
 
     const child = spawn(bin, ['serve', '--port', String(port), '--hostname', SERVE_HOST], {
-      env: { ...process.env, OPENCODE_CONFIG: ocConfigDir() },
+      env: {
+        ...process.env,
+        OPENCODE_CONFIG: ocConfigDir(),
+        // 模型服务走系统代理（对标 ow-bridge）；无代理时直连
+        ...(opts.proxy ? {
+          HTTPS_PROXY: opts.proxy,
+          HTTP_PROXY: opts.proxy,
+          https_proxy: opts.proxy,
+          http_proxy: opts.proxy,
+        } : {}),
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: process.platform === 'win32' && /\.cmd$/i.test(bin),
       windowsHide: true,
@@ -420,11 +457,11 @@ function tryStart(bin, port, onProgress) {
 }
 
 // 启动隔离的 opencode serve，返回 { baseUrl, port, stop, version, logFile }
-async function startServe(bin, preferredPort, onProgress) {
+async function startServe(bin, preferredPort, onProgress, opts = {}) {
   const ports = [preferredPort, ...SERVE_PORTS.filter((p) => p !== preferredPort)];
   for (const p of ports) {
     if (await isPortFree(p)) {
-      return tryStart(bin, p, onProgress);
+      return tryStart(bin, p, onProgress, opts);
     }
   }
   throw new Error(`端口 ${ports.join('/')} 都被占用，无法启动本地服务`);

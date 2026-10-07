@@ -41,6 +41,11 @@ npm start            # 开发运行（需装 Electron）
 npm run dist:win     # 打 Windows x64 portable 包（在 Linux 下也可执行）
 ```
 
+## 代理与网络
+
+- Windows 下默认读取**系统代理**（Internet 选项里的 HTTP/HTTPS 代理）：OpenCode 的下载、版本查询以及模型服务都会走它；没有配置时自动直连。托盘菜单可开关（重启生效）；
+- 官方 registry 下载失败时自动换 npmmirror 镜像重试。
+
 ## 行为和限制（必读）
 
 - **免费模型及额度由上游（OpenCode Zen）决定**，名单和可用性会变；应用每次启动都会重新探测，不可用模型不会被导入；
